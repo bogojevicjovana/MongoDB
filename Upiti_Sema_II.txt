@@ -1,0 +1,200 @@
+db.getCollection("artists_data_set").find({})
+
+// 1.Prikazi  sve podatke o pesmi koja ima najvise slusanja pod uslovom da je izasla posle 2000 za sve izvodjace.
+db.getCollection("artists_data_set").aggregate([
+{ $unwind : "$artist_info.album_info.track_info.track_feautures.listeners_lastfm" },
+                { $match : {"artist_info.album_info.track_info.year" : { $gt: 2000}}},
+                {$sort :{"artist_info.album_info.track_info.track_feautures.listeners_lastfm": -1}},
+                {$limit: 1}/*,
+                {$project: { "song_name": "$album_info.track_info.name" }}*/], { allowDiskUse: true } )
+                
+
+// 2.Pronaci najmanji broj pesama po godinama cije osobine su eksplicitnog karaktera
+db.getCollection("artists_data_set").aggregate([
+                { $match : {"artist_info.album_info.track_info.track_feautures.explicit" : true}},
+                { $group : {
+                    "_id": {
+                        "eksplicit": "$artist_info.album_info.track_info.track_feautures.explicit",
+                        "year": "$artist_info.album_info.track_info.year"
+                        },
+                    "total_tr": {$sum : 1}
+                }},
+                {$sort : {total_tr: 1}},
+                { $group : {
+                    "_id": "$_id.year",
+                    "eksplicit": {$first :"$_id.eksplicit"},
+                    "total_tr": {$first : "$total_tr"}
+                }}
+                ]
+)  
+        
+    
+//3. Kolika je prosecna duzina trajanja pesama ciji je danceability veci od 0.8 i imaju eksplicitni karakter za pojedine izvodjace?
+db.getCollection("artists_data_set").aggregate([
+                { $match : { $and: [ {"artist_info.album_info.track_info.track_feautures.danceability" : {$gt: 0.8}}, { "artist_info.album_info.track_info.track_feautures.explicit" : true}]}},
+                { $project:
+                    {
+                    "_id":0,
+                    "duzina" : "$artist_info.album_info.track_info.track_feautures.music_atributes.duration_ms"
+                    }
+                },
+                { $group : {
+                    "_id": 0,
+                    "avrage_duration_ms": {$avg: "$duzina"}
+                }} 
+                ]
+)
+    
+    
+                        
+// 4. Po decenijama naci izvodjaca sa najvise pesama koje su imale izvodjenje uzivo ;
+db.getCollection("artists_data_set").aggregate([
+                 { $match : {"artist_info.album_info.track_info.track_feautures.liveness" : { $gt: 0.8}}},
+                { $group : {
+                    "_id": {
+                        "artist": "$artist_info.artists",
+                        "dec" : 
+                        {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 1990 ]}, 1980, 
+                            {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 2000 ]}, 1990,
+                                {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 2010 ]}, 2000, 2010]}
+                            ]}
+                        ]}
+                     },
+                    "total_tr": {$sum : 1}
+                }},
+                {$sort : {total_tr : -1}},
+                { $group : {
+                    "_id": "$_id.dec",
+                    "artist": {$first : "$_id.artist"},
+                    "total_tr": {$first : "$total_tr"}
+                }}
+                ]
+) 
+                
+                
+// 5. Da li su se vise slusale eksplicitnije i energicinije pesme pre  2005, nego posle
+db.getCollection("artists_data_set").aggregate([
+                { $match : {"artist_info.album_info.track_info.track_feautures.acousticness" : { $gt: 0.24}}},
+                { $group : {
+                    "_id": {
+                        "mode": "$artist_info.album_info.track_info.track_feautures.acousticness",
+                        "godina": "$artist_info.album_info.track_info.year"
+                        },
+                    "ukupan_broj_numera": { $sum : 1 }
+                }},
+                {$sort : {ukupan_broj_numera: -1}}, {$limit: 1},
+                { $group :
+                {
+                    "_id": "$_id.godina",
+                    "mode": {$first :"$_id.mode"},
+                    "ukupan_broj_numera": {$first : "$ukupan_broj_numera"}
+                }}
+                ]
+)
+                
+
+//1. Koliko u prosjeku traju energicne pjesme pogodne za ples izrazeno u milisekundima?
+
+db.getCollection("artists_data_set").aggregate([
+        { $match : { $and: [ {"artist_info.album_info.track_info.track_feautures.danceability" : { $gt : 0.5}}, 
+                             {"artist_info.album_info.track_info.track_feautures.energy" : { $gt : 0.5 }}]}},
+        { $group: { 
+                     _id: null,
+                     prosjecna_duzina_trajanja : { $avg : "$artist_info.album_info.track_info.track_feautures.music_atributes.duration_ms"}
+                  }
+        },
+        { $project: { 
+               _id : 0,
+             "avg_duzina_trajanja_pjesama": {$round : ["$prosjecna_duzina_trajanja", 0]}
+        }}
+]);
+
+
+
+// 2. U kojoj godini je bend Metallica izdao najvise numera?
+
+db.getCollection("artists_data_set").aggregate([
+           { 
+               $match : { $and: [ {"artist_info.artists": "Metallica"}, 
+                                  {"artist_info.album_info.track_info.year" : { $gt : 1980, $lt : 2021 }}]}
+           }, 
+           {
+             $group: {
+			"_id": "$artist_info.album_info.track_info.year", 
+			broj_numera: { $sum: 1 }
+		     }
+           },
+           {
+               $sort: {"broj_numera" : -1}
+           }  , {$limit: 1}
+]);
+
+
+// 3. U kojoj drzavi je izdato najvise numera sa eksplicitnim karakterom u poslednjoj deceniji?
+
+db.getCollection("artists_data_set").aggregate([
+     { $match : {$and: [{"artist_info.album_info.track_info.track_feautures.explicit" :  true}, 
+                        {"artist_info.album_info.track_info.year" : { $gt : 2010, $lt : 2021 }}]}},
+     { $group: {
+                  "_id" : {
+                          "drzava":"$artist_info.country_mb", 
+                          
+                          }, 
+                      ukupan_broj_numera: { $sum : 1 }          
+                  
+     }}, 
+     { $sort: {"ukupan_broj_numera" : -1} },  {$limit: 1}
+     
+])
+
+
+//4. U kojoj godini je izdato najvise numera u minor modu?
+
+db.getCollection("artists_data_set").aggregate([
+                { $match : {"artist_info.album_info.track_info.track_feautures.music_atributes.mode" : 0}},
+                { $group : {
+                    "_id": {
+                        "mode": "$artist_info.album_info.track_info.track_feautures.music_atributes.mode",
+                        "godina": "$artist_info.album_info.track_info.year"
+                        },
+                    "ukupan_broj_numera": { $sum : 1 }
+                }},
+                {$sort : {ukupan_broj_numera: -1}}, { $limit: 1 },
+                { $group :
+                {
+                    "_id": "$_id.godina",
+                    "mode": {$first :"$_id.mode"},
+                    "ukupan_broj_numera": {$first : "$ukupan_broj_numera"}
+                }}
+                ]
+)
+
+// 5.Po decenijama pronaci drzavu u kojoj su izvodjaci izdali najvise numera.
+
+db.getCollection("artists_data_set").aggregate([
+        { $group : {
+                    "_id": {
+                        "drzava": "$artist_info.country_mb",
+                        "dec" : 
+                        {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 1990 ]}, 1980, 
+                            {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 2000 ]}, 1990,
+                                {$cond: [{ $lt: ["$artist_info.album_info.track_info.year", 2010 ]}, 2000, 2010]}
+                            ]}
+                        ]}
+                     },
+                    "ukupan_broj": { $sum : 1 }
+                }},
+                {$sort : {ukupan_broj : -1}},
+                { $group : {
+                    "_id": "$_id.dec",
+                    "drzava": {$first : "$_id.drzava"},
+                    "ukupan_broj": {$first : "$ukupan_broj"}
+                }}
+])
+
+//indexi
+db = db.getSiblingDB("spotify_music");
+db.getCollection("artists_data_set").find({});
+db.artists_data_set.createIndex( { "artist_info.album_info.track_info.year" : 1 } )
+db.artists_data_set.createIndex( { "artist_info.artists" : 1 } )
+
